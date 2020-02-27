@@ -1,0 +1,599 @@
+---
+title: "Homework 1 - Student Loan Debt"
+author: "Xueying Huang"
+date: '2020-02-26'
+output: 
+  html_notebook:
+    toc: yes
+  pdf_document:
+    toc: yes
+  word_document:
+    toc: yes
+  html_document:
+    highlight: textmate
+    theme: spacelab
+    toc: yes
+always_allow_html: yes
+---
+
+```{r Setup, include=FALSE, results='hide', warning=FALSE}
+library(knitr)
+opts_chunk$set(fig.path="figures/",
+               cache.path="cache/",
+               cache=FALSE,
+               echo=TRUE,
+               message=FALSE,
+               warning=FALSE)  
+```  
+
+## Scenario
+
+Imagine you are a data scientist at a respected media outlet -- say the "New York Times". For a feature article provisionally called `Indebted to Learn`, your editor-in-chief asks you to analyze some data on the development of student loan debt over time and prepare some data visualizations in which you outline the main patterns around which to base the story.
+
+Since there is **no way that all features of the data can be represented** in such a memo, feel free to pick and choose some patterns that would make for a good story -- outlining important patterns and presenting them in a visually pleasing way. 
+
+The full background and text of the story will be researched by a writer of the magazine -- your input should be based on the data and some common sense (i.e. no need to read up on this). It does help, however, to briefly describe what you are presenting and what it highlights.
+
+Provide **polished plots** that are refined enough to include in the magazine with very little further manipulation (already include variable descriptions [if necessary for understanding], titles, source [e.g. "Survey of Consumer Finances (SCF)"], right color, etc.) and are understandable to the average reader of the "New York Times". The design does not need to be NYTimes-like. Just be consistent.
+
+```{r, echo=FALSE, out.width = "400px"}
+knitr::include_graphics("data/Student-Debt.jpg")
+```
+
+## Tasks
+
+### Debt over time
+#### 1. Debt over time
+
+Investigate how household debt has developed over time from 1989 to 2016. Did student debt become more important over time? How did student loan debt compare to other types of debt (car loans, mortgage, credit card, etc.)? Consider using the ratios of debt to income and/or assets to explore this question. To do this, you will need to wrangle the data to calculate median/mean values by survey year for some variables of interest. 
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(tidyverse)
+library(wesanderson)
+library(plotly)
+library(DT)
+library(highcharter)
+library(ggthemes)
+```
+
+```{r}
+survey_data <- read.delim("data/survey_SCF.txt", header = TRUE, sep = ",", dec = ".")
+head(survey_data, 10)
+```
+
+```{r}
+mean_total_debt <-survey_data %>%
+  group_by(YEAR) %>%
+  summarise(DEBT_BY_YEAR = mean(DEBT))
+
+mean_debt_by_year <- ggplot(mean_total_debt, aes(x=YEAR, y=DEBT_BY_YEAR))+
+  geom_line(color="#69b3a2", size=2, alpha=0.9, linetype= 2)+
+  geom_label(
+    label= round(mean_total_debt$DEBT_BY_YEAR,0), 
+    nudge_x = 0.25, nudge_y = 0.25,
+    fill="orange",
+    alpha =0.4)+
+  labs(x = "Year", y = "Average Debt of Household")+
+  scale_x_continuous(breaks = seq(1989,2016,3))+
+  ggtitle("The Change of Household Debt From 1989 to 2016")+
+  theme_bw()+
+    theme(plot.title = element_text(
+    size = rel(1.5), hjust =0.5, lineheight = .9,
+    family = "Times", face = "bold.italic", colour = "black"), 
+    panel.background = element_rect(fill = "white", colour = NA),
+    axis.line = element_line(linetype = "solid"))
+
+    
+
+mean_debt_by_year
+```
+```{r}
+debt_composition <- survey_data %>%
+  select(YEAR, INCOME, NH_MORT, OTHLOC, CCBAL, INSTALL, EDN_INST, VEH_INST) %>%
+  group_by(YEAR) %>%
+  summarise(Mortgage = mean(NH_MORT), Other = mean(OTHLOC), CreditCard = mean(CCBAL), Installment = mean(INSTALL),
+            Education = mean(EDN_INST), Vehicle = mean(VEH_INST))%>%
+  gather(key = "types_of_debt", value = "debt_value", Mortgage, Other, CreditCard, Installment, Education, Vehicle)
+```
+
+
+```{r}
+ggplot(debt_composition, aes(fill = types_of_debt, y = debt_value, x= factor(YEAR))) + 
+    geom_bar(position="fill", stat="identity") +
+    labs(x = NULL, y = "Debt Composition", fill = "Types of Debt")+
+    ggtitle("The Change of Debt Composition")+
+    scale_fill_brewer(palette="BrBG")+
+    theme(plot.title = element_text(
+    size = rel(1.5), hjust =0.5, lineheight = .9,
+    family = "Times", face = "bold.italic", colour = "black"), 
+    panel.background = element_rect(fill = "white", colour = NA))
+```
+```{r}
+dti <- survey_data %>%
+  select(YEAR, INCOME, NH_MORT, OTHLOC, CCBAL, INSTALL, EDN_INST, VEH_INST) %>%
+  filter(!is.na(INCOME) & INCOME !=0) %>%
+  group_by(YEAR) %>%
+  summarise(Mortgage = mean(NH_MORT/INCOME), Other = mean(OTHLOC/INCOME), CreditCard = mean(CCBAL/INCOME), Installment = mean(INSTALL/INCOME),Education = mean(EDN_INST/INCOME), Vehicle = mean(VEH_INST/INCOME))%>%
+  gather(key = "types_of_debt", value = "dti", Mortgage, Other, CreditCard, Installment, Education, Vehicle)
+
+ggplot(dti, aes(x= YEAR, y= dti, group= factor(types_of_debt), color=factor(types_of_debt))) +
+    geom_line()+
+    geom_point(size=2)+
+    scale_y_continuous(trans = 'log10')+
+    scale_x_continuous(breaks = seq(1989,2016,3))+
+    labs(x = "Year", y = "Debt to Income Ratio")+
+    ggtitle("Ratio of Debt to Income over Years") +
+    theme_minimal()+
+    theme(plot.title = element_text(
+    size = rel(1.5), hjust = 0.5, lineheight = .9,
+    family = "Times", face = "bold.italic", colour = "black"), 
+    legend.position="top",
+    legend.direction = "horizontal",
+    legend.title = element_blank(),
+    legend.justification = 0.9,
+    legend.key.height=unit(1,"line"),
+    legend.key.width=unit(3,"line"))
+```
+I adpoted stack plots to describe the DTI ratio (Debt to Income) of different debts. But in stack plots, I droped mortgage debt, which overwhelmed other kinds of debt too much. Then, I noticed that there is a surge of credit card loan in 1992. In order to study education loan recent decades, I put more attention on the period from 1995 to 2016 and found that education loan has increased over past two decades.
+```{r}
+stack_dti <- survey_data %>%
+  select(YEAR, INCOME, NH_MORT, OTHLOC, CCBAL, INSTALL, EDN_INST, VEH_INST) %>%
+  filter(!is.na(INCOME))%>%
+  filter(INCOME != 0) %>%
+  group_by(YEAR) %>%
+  summarise(Other = mean(OTHLOC/INCOME), CreditCard = mean(CCBAL/INCOME), Installment = mean(INSTALL/INCOME), Education = mean(EDN_INST/INCOME), Vehicle = mean(VEH_INST/INCOME))%>%
+  gather(key = "types_of_debt", value = "debt_to_income", Other, CreditCard, Installment, Education, Vehicle)%>%
+  ggplot(aes(x = YEAR, y = debt_to_income, fill = factor(types_of_debt), 
+             order = desc(factor(types_of_debt)))) +
+            geom_area(alpha = 0.5) +
+    labs(x = "Year", y = "Debt to Income", fill = "Types of Debt")+
+    scale_x_continuous(breaks = seq(1989,2016,3))+
+    ggtitle("The Ratio of Debt to Income")+
+    scale_fill_brewer(palette="PuOr")+
+    theme(plot.title = element_text(
+    size = rel(1.5), hjust =0.5, lineheight = .9,
+    family = "Times", face = "bold.italic", colour = "black"), 
+    panel.background = element_rect(fill = "white", colour = NA),
+    axis.line = element_line(linetype = "solid"))
+stack_dti
+```
+```{r}
+stack_dti_recent <-survey_data %>%
+  select(YEAR, INCOME, NH_MORT, OTHLOC, CCBAL, INSTALL, EDN_INST, VEH_INST) %>%
+  filter(!is.na(INCOME) & INCOME != 0 & YEAR >=1995) %>%
+  group_by(YEAR) %>%
+  summarise(Other = mean(OTHLOC/INCOME), CreditCard = mean(CCBAL/INCOME), Installment = mean(INSTALL/INCOME), Education = mean(EDN_INST/INCOME), Vehicle = mean(VEH_INST/INCOME))%>%
+  gather(key = "types_of_debt", value = "debt_to_income", Other, CreditCard, Installment, Education, Vehicle)%>%
+  ggplot(aes(x = YEAR, y = debt_to_income, fill = factor(types_of_debt), 
+             order = desc(factor(types_of_debt)))) +
+            geom_area(alpha = 0.5) +
+    labs(x = "Year", y = "Debt to Income", fill = "Types of Debt")+
+    scale_x_continuous(breaks = seq(1995,2016,3))+
+    ggtitle("The Ratio of Debt to Income")+
+    scale_fill_brewer(palette="PRGn")+
+    theme(plot.title = element_text(
+    size = rel(1.5), hjust =0.5, lineheight = .9,
+    family = "Times", face = "bold.italic", colour = "black"), 
+    panel.background = element_rect(fill = "grey", colour = NA),
+    axis.line = element_line(linetype = "solid"))
+stack_dti_recent
+```
+### Race, Gender, Education and Student Debt 
+#### 2. Tell me who you are
+
+I explored how race and gender influenced student loan. Since we do not know the specific reasons of zero values(They were too rich and no need for loan or they had paid off all of their student loan), I just used those observations who still have student loan till this survey. And I found there was an obvious pattern that Hispanic females and females form minority races in the US had higher student loan than other race females and males. 
+```{r}
+library(ggthemes)
+race_data <- survey_data %>%
+  filter(YEAR == 2016) %>%
+  filter(!is.na(EDN_INST) & EDN_INST != 0)%>%
+  select(EDN_INST, RACE, HHSEX, AGECL, INCOME, EDUC) 
+
+ggplot(race_data, aes(x = factor(RACE), y= EDN_INST, fill= factor(HHSEX))) +
+  geom_boxplot()+
+  coord_flip()+
+  scale_x_discrete(limits = rev(levels(factor(race_data$RACE))), breaks=c("1","2","3","5"),labels=c("white non-Hispanic", "Black / African American", "Hispanic","Other")) +
+    labs(x=NULL, y = "Education Loan")+
+    scale_fill_manual( values = c("lightblue","#FFCCCC"),
+                        name = "Gender",
+                         breaks=c("1", "2"),
+                        labels=c("Male", "Female"))+
+  scale_y_continuous(trans = 'log10')+
+  theme_bw()+
+  theme(strip.background = element_blank(),
+        legend.background = element_rect(color="black", fill="white", size=0.5, linetype="solid"), 
+        legend.direction = "vertical",
+        panel.grid.minor = element_line(colour="white", linetype="dashed"),
+        panel.grid.major = element_line(colour = "white",linetype="dashed"),
+        panel.border = element_rect(linetype = "solid")
+        )
+```
+
+```{r}
+data2016 <- survey_data %>%
+  filter(YEAR == 2016)%>%
+  select(EDUC, EDN_INST, NH_MORT, OTHLOC, CCBAL, INSTALL, VEH_INST, DEBT,INCOME, WAGEINC, ASSET, NETWORTH, HHSEX) 
+
+data2016$EDUC[data2016$EDUC %in% c(-1:9)] <- "NO COLLEGE DEGREE"
+data2016$EDUC[data2016$EDUC %in% c(10,11)] <- "ASSOCIATE DEGREE"
+data2016$EDUC[data2016$EDUC == 12] <- "BACHELOR'S DEGREE"
+data2016$EDUC[data2016$EDUC == 13] <- "MASTER'S DEGREE"
+data2016$EDUC[data2016$EDUC == 14] <- "DOCTORATE DEGREE"
+data2016$EDUC <- factor(data2016$EDUC, levels= c("NO COLLEGE DEGREE","ASSOCIATE DEGREE","BACHELOR'S DEGREE", "MASTER'S DEGREE", "DOCTORATE DEGREE"))
+data2016$HHSEX <- ifelse(data2016$HHSEX == 1, "Male", "Female")
+
+```
+
+I also recoded the degree types and try to find the impact of education level and gender on student loan. I used the size of points as the number of people who owned the degrees. As you can see, More male households have degrees than females. There was a interesting finding, male households had higher student loan than that of female at lower degrees; however, female who had higher degrees like master or PHD had higher loan than male.
+```{r}
+edu_gender <- data2016 %>%
+  group_by(HHSEX, EDUC)%>%
+  filter(EDN_INST != 0) %>%
+  summarise(average_std_loan = mean(EDN_INST), number = n())
+
+p_edu_gender <-ggplot(edu_gender, aes(x= EDUC, y= average_std_loan, col = factor(HHSEX), size = number, label = "Year: 2016"))+
+  geom_point(alpha=0.5)+
+  labs(x = NULL, y = "Average Education Loan")+
+  scale_y_continuous(trans = 'log10')+
+  scale_size_continuous(range = c(1,15))+
+  scale_x_discrete(labels=c("No Degree", "Associate","Bachelor","Master", "PHD"))+
+  theme_bw()+
+  theme(
+  legend.title = element_blank(),
+  plot.title = element_text(
+  size = rel(1.5), hjust = 0.5, lineheight = .9,
+  family = "Times", face = "bold.italic", colour = "black"), 
+  panel.background = element_rect(fill = "white", colour = NA))
+
+p_edu_gender
+```
+
+```{r}
+debt_income_degree <-data2016 %>%
+  filter(DEBT !="NaN")%>%
+  filter(INCOME !="NaN")%>%
+  filter(NETWORTH != "NaN") %>%
+  group_by(EDUC) %>%
+  summarize(Mean_Student_Loan = mean(DEBT), Mean_Income = mean(INCOME), mean_net_worth = mean(NETWORTH)) %>%
+  ggplot(aes(x=EDUC))+
+  geom_bar(aes(y= Mean_Income),stat="identity",position ="identity",alpha=.3,fill='lightblue',color='lightblue4')+
+  geom_bar(aes(y=Mean_Student_Loan),stat="identity",position ="identity",alpha=.8,fill='pink',color='red')+
+  geom_line(aes(x = as.numeric(EDUC), y=mean_net_worth/10))+
+  scale_y_continuous(sec.axis = sec_axis(~.*10))+
+  scale_x_discrete(labels=c("No Degree", "Associate","Bachelor","Master", "PHD"))+
+  labs(x = NULL, y = NULL) +
+  ggtitle("Average Debt and Income of Different Degree Types") +
+    theme(plot.title = element_text(
+    size = rel(1.5), hjust = 0.5, lineheight = .9,
+    family = "Times", face = "bold.italic", colour = "black"), 
+    panel.background = element_rect(fill = "white", colour = NA))
+
+debt_income_degree
+```
+### Wealth and Income Distribution
+#### 3. Wealth and Income Distribution
+
+I calculated the average student loan of different income groups. When I included zero values, the average student loan of high income percentile groups was lower; however, the average of high income student loan became the most when I droped those observations whose student debt were zero. Same situations happened when I explored the correlations of student loan and net worth. I think the reason was that high income groups included many rich people who do not need student loan and those who had worked many yearshad and paid off their student loan. When I droped zero values, I excluded these people. And the thing became those high income groups also had high student loans. It was possible because people with higher degrees would have high income but also have lots of student loan to be paid.
+
+```{r}
+survey_data_3 <- survey_data %>%
+  filter(YEAR==2016)%>%
+  select(EDN_INST, INCCAT, NWCAT)
+survey_data_3$INCCAT <- as.factor(survey_data_3$INCCAT)
+survey_data_3$NWCAT <- as.factor(survey_data_3$NWCAT)
+
+survey_data_3 %>%
+  filter(!is.na(EDN_INST))%>%
+  group_by(INCCAT)%>%
+  summarise(average_student_loan = mean(EDN_INST))%>%
+  ggplot(aes(x=INCCAT, y=average_student_loan, fill = INCCAT))+ 
+  geom_bar(stat = "identity")+
+  geom_text(aes(label=round(average_student_loan), vjust=-0.5))+
+  scale_fill_brewer(palette="PuOr") +
+  ggtitle("Average Education Loan of Different Income Percentile Groups") +
+  labs(x = NULL, y = NULL) +
+  scale_x_discrete(labels = c("0th-20th", "20th-40th", "40th-60th", "60th-80th", "80th-90th", "Top 10th"))+
+    theme(plot.title = element_text(
+    size = rel(1.5), hjust = 0.5, lineheight = .9,
+    family = "Times", face = "bold.italic", colour = "black"), 
+    panel.background = element_rect(fill = "white", colour = NA),
+    axis.line = element_line(linetype = "solid"))
+```
+```{r}
+survey_data_3 <- survey_data %>%
+  filter(YEAR==2016)%>%
+  select(EDN_INST, INCCAT, NWCAT)
+survey_data_3$INCCAT <- as.factor(survey_data_3$INCCAT)
+survey_data_3$NWCAT <- as.factor(survey_data_3$NWCAT)
+
+survey_data_3 %>%
+  filter(!is.na(EDN_INST))%>%
+  filter(EDN_INST != 0)%>% 
+  group_by(INCCAT)%>%
+  summarise(average_student_loan = mean(EDN_INST))%>%
+  ggplot(aes(x=INCCAT, y=average_student_loan, fill = INCCAT))+ 
+  geom_bar(stat = "identity")+
+  geom_text(aes(label=round(average_student_loan), vjust=-0.5))+
+  scale_fill_brewer(palette="PuOr") +
+  ggtitle("Average Education Loan of Different Income Percentile Groups") +
+  labs(x = NULL, y = NULL) +
+  scale_x_discrete(labels = c("0th-20th", "20th-40th", "40th-60th", "60th-80th", "80th-90th", "Top 10th"))+
+    theme(plot.title = element_text(
+    size = rel(1.5), hjust = 0.5, lineheight = .9,
+    family = "Times", face = "bold.italic", colour = "black"), 
+    panel.background = element_rect(fill = "white", colour = NA),
+    axis.line = element_line(linetype = "solid"))
+```
+
+```{r}
+survey_data_3 %>%
+  group_by(NWCAT)%>%
+  summarise(average_student_loan = mean(EDN_INST))%>%
+  ggplot(aes(x=NWCAT, y=average_student_loan, fill = NWCAT))+ 
+  geom_bar(stat = "identity")+
+  geom_text(aes(label=round(average_student_loan), vjust=-0.5))+
+  scale_fill_brewer(palette="GnBu") +
+  ggtitle("Average Education Loan of Different Net Worth Percentile Groups") +
+  labs(x = NULL, y = NULL) +
+  scale_x_discrete(labels = c("0th-25th", "25th-50th", "50th-75th", "75th-90th","Top 10th"))+
+    theme(plot.title = element_text(
+    size = rel(1.5), hjust = 0.5, lineheight = .9,
+    family = "Times", face = "bold.italic", colour = "black"), 
+    panel.background = element_rect(fill = "white", colour = NA),
+    axis.line = element_line(linetype = "solid"))
+```
+```{r}
+survey_data_3 %>%
+  filter(!is.na(EDN_INST))%>%
+  filter(EDN_INST != 0)%>% 
+  group_by(NWCAT)%>%
+  summarise(average_student_loan = mean(EDN_INST))%>%
+  ggplot(aes(x=NWCAT, y=average_student_loan, fill = NWCAT))+ 
+  geom_bar(stat = "identity")+
+  geom_text(aes(label=round(average_student_loan), vjust=-0.5))+
+  scale_fill_brewer(palette="GnBu") +
+  ggtitle("Average Education Loan of Different Net Worth Percentile Groups") +
+  labs(x = NULL, y = NULL) +
+  scale_x_discrete(labels = c("0th-25th", "25th-50th", "50th-75th", "75th-90th","Top 10th"))+
+    theme(plot.title = element_text(
+    size = rel(1.5), hjust = 0.5, lineheight = .9,
+    family = "Times", face = "bold.italic", colour = "black"), 
+    panel.background = element_rect(fill = "white", colour = NA),
+    axis.line = element_line(linetype = "solid"))
+```
+
+### Is Student Loan a Reason for Bankruptcy?
+#### 4. Going broke
+
+I just used the data of Year 2016. First, I recoded the student loan column and just distinguished if the observations had student loan.
+And I compared the number of people who whether had student loan in bankruptcy group and no bankruptcy group. I found that in bankruptcy group, a higher proportion of people had student loan. 
+```{r}
+data_4 <- survey_data %>%
+  filter(YEAR == 2016)%>%
+  filter(!is.na(EDN_INST) & !is.na(BNKRUPLAST5))
+data_4$EDN_INST[data_4$EDN_INST != 0] <- "HAVE STUDENT LOAN"
+data_4$EDN_INST[data_4$EDN_INST == 0] <- "NO STUDENT LOAN"
+data_4$EDN_INST <- factor(data_4$EDN_INST, levels= c( "NO STUDENT LOAN", "HAVE STUDENT LOAN"))
+
+
+
+ggplot(data_4, aes(x = factor(BNKRUPLAST5), fill = EDN_INST)) +
+  geom_bar(position="fill", width = 0.8, alpha =0.7) +
+  coord_flip()+
+    scale_x_discrete(labels=c("No Bankruptcy", "Bankruptcy"))+
+    labs(x = NULL, y = NULL)+
+    ggtitle("The Proportion of People Who Have Student Loan")+
+    scale_fill_manual( values = c("lightblue","orange"),
+                        name = NULL,
+                         breaks=c("HAVE STUDENT LOAN", "NO STUDENT LOAN")
+                        )+
+    theme( aspect.ratio = 1/3,
+      plot.title = element_text(
+    size = rel(1.5), hjust =0.5, lineheight = .9,
+    family = "Times", face = "bold.italic", colour = "black"), 
+    panel.background = element_rect(fill = "white", colour = NA)
+    )
+```
+I also displayed the distribution of student loan value of bankruptcy group and no bankruptcy group. In no bankruptcy group, more people had light student loan; however, in bankruptcy group, more people had middle or heavy student loan.
+```{r}
+std_bankruptcy <- survey_data %>%
+  filter(YEAR == 2016) %>%
+  filter(!is.na(BNKRUPLAST5))%>%
+  select(YEAR, INCOME, NH_MORT, OTHLOC, CCBAL, INSTALL, EDN_INST, VEH_INST, BNKRUPLAST5) %>%
+  group_by(BNKRUPLAST5) %>%
+  summarise(Mortgage = mean(NH_MORT), Other = mean(OTHLOC), CreditCard = mean(CCBAL), Installment = mean(INSTALL),
+            Education = mean(EDN_INST), Vehicle = mean(VEH_INST))%>%
+  gather(key = "types_of_debt", value = "debt_value", Mortgage, Other, CreditCard, Installment, Education, Vehicle)
+```
+```{r}
+bankruptcy_std_distribution <- survey_data %>%
+  filter(YEAR == 2016) %>%
+  filter(!is.na(EDN_INST) & EDN_INST != 0) %>%
+  filter(!is.na(BNKRUPLAST5))
+
+
+ggplot(bankruptcy_std_distribution, aes(EDN_INST, fill = factor(BNKRUPLAST5))) +
+  geom_density(alpha = 0.5)+
+  labs(x = "Education Loan", y = "Density") +
+  scale_fill_manual(values=c("#E69F00", "#56B4E9"),
+                        name = "Whether bankruptcy in past 5 years?",
+                         breaks=c("0", "1"),
+                        labels=c("No Bankruptcy", "Bankruptcy"))+
+  ggtitle("Density Distribution of Average Education Loan") +
+    theme(plot.title = element_text(
+    size = rel(1.5), hjust = 0.5, lineheight = .9,
+    family = "Times", face = "bold.italic", colour = "black"), 
+    panel.background = element_rect(fill = "white", colour = NA),
+    legend.position="top")
+```
+I also checked the debt composition of two groups and found that people who experienced bankruptcy had higher porpotion of education loan and mortgage loan.
+```{r}
+ggplot(std_bankruptcy, aes(fill = types_of_debt, y = debt_value, x= factor(BNKRUPLAST5))) + 
+    geom_bar(position="fill", stat="identity", alpha = 0.7) +
+    scale_x_discrete(labels=c("No Bankruptcy", "Bankruptcy"))+
+    labs(x = NULL, y = "Debt Composition", fill = "Types of Debt")+
+    ggtitle("Debt Composition of Bankruptcy/No Bankruptcy Group")+
+    scale_fill_brewer(palette="PuOr") +
+    theme(plot.title = element_text(
+    size = rel(1.5), hjust =0.5, lineheight = .9,
+    family = "Times", face = "bold.italic", colour = "black"), 
+    panel.background = element_rect(fill = "white", colour = NA))
+```
+For those who did not have a bankruptcy in past 5 years, they were more likely to eat outside or odered delivered. 
+```{r}
+food_bankruptcy <- survey_data %>%
+  filter(YEAR == 2016) %>%
+  select(FOODHOME, FOODDELV, FOODAWAY, BNKRUPLAST5, FORECLLAST5, LATE)%>%
+  group_by(BNKRUPLAST5) %>%
+  summarise(HOME = mean(FOODHOME), OUTSIDE = mean(FOODAWAY), DELIVERED = mean(FOODDELV))%>%
+  gather(key = "Where_got_food", value = "Amount", HOME, OUTSIDE, DELIVERED)
+
+```
+```{r}
+ggplot(food_bankruptcy, aes(fill = Where_got_food, y = Amount, x = factor(BNKRUPLAST5))) + 
+    geom_bar(position="dodge", stat="identity")+
+    scale_x_discrete(labels=c("No Bankruptcy", "Bankruptcy"))+
+    labs(x = NULL, y = "Amount Spent on Food", fill = "Food Habits")+
+    scale_fill_brewer(palette="Pastel1") +
+    ggtitle("Eating Habits and Financial Situation")+
+    theme(plot.title = element_text(
+    size = rel(1.5), hjust =0.5, lineheight = .9,
+    family = "Times", face = "bold.italic", colour = "black"), 
+    panel.background = element_rect(fill = "white", colour = NA))
+```
+### Interactivity
+
+#### 5. Make two plots interactive
+
+I chosed to make this plot interactive because there are more information I wanted to convey by this plot. So, I can use "hoverinfo" to add detailed information of each point. This can help readers understand the plot more easily.
+```{r}
+edu_gender <- data2016 %>%
+  group_by(HHSEX, EDUC)%>%
+  filter(EDN_INST != 0) %>%
+  summarise(average_std_loan = mean(EDN_INST), number = n())
+
+p_edu_gender <-ggplot(edu_gender, aes(x= EDUC, y= average_std_loan, col = factor(HHSEX), size = number, label = "Year: 2016"))+
+  geom_point(alpha=0.5)+
+  labs(x = NULL, y = "Average Education Loan")+
+  scale_y_continuous(trans = 'log10')+
+  scale_size_continuous(range = c(1,15))+
+  scale_x_discrete(labels=c("No Degree", "Associate","Bachelor","Master", "PHD"))+
+  theme_bw()+
+  theme(
+  legend.title = element_blank(),
+  plot.title = element_text(
+  size = rel(1.5), hjust = 0.5, lineheight = .9,
+  family = "Times", face = "bold.italic", colour = "black"), 
+  panel.background = element_rect(fill = "white", colour = NA))
+
+ggplotly(p_edu_gender)
+```
+```{r}
+plot_ly(edu_gender, 
+        x = ~EDUC, 
+        y = ~average_std_loan, 
+        size=~number,
+        color= ~HHSEX, 
+        type = "scatter", 
+        mode='markers',
+        marker = list(size = ~number, opacity = 0.5, sizemode = 'area',symbol = 'circle', sizemode = 'diameter',
+                      line = list(width = 2, color = '#FFFFFF')),
+        hoverinfo = 'text',
+        text = ~paste('Degree:',EDUC, '<br>Average Education Loan:',round(average_std_loan,2), '<br> Count:', number)) %>%
+layout(yaxis = list(title = 'Average Student Loan', type="log"),
+       xaxis = list(title = '',
+                    ticktext = list("No Degree", "Associate","Bachelor","Master", "PHD"),
+                    tickvals = list("NO COLLEGE DEGREE","ASSOCIATE DEGREE","BACHELOR'S DEGREE", "MASTER'S DEGREE",                       "DOCTORATE DEGREE"),
+                    tickmode = "array"),
+       title = "Average Education Loan of Different Degress",
+       paper_bgcolor = 'rgb(243, 243, 243)',
+        plot_bgcolor = 'rgb(243, 243, 243)'
+       )
+```
+I chosed to make this plot interactive because there were too many lines in one plot and had overlaps. And some groups had too great values that overwhelmed that of other groups. So, I splited them into subplots to have a more clear visualization.
+```{r}
+p_dti <- ggplot(dti, aes(x= YEAR, y= dti, group= factor(types_of_debt), color=factor(types_of_debt))) +
+    geom_line()+
+    geom_point(size=1)+
+    facet_wrap(~ types_of_debt)+
+    scale_y_continuous(trans = 'log10')+
+    scale_x_continuous(breaks = seq(1989,2016,6))+
+    labs(x = "Year", y = "Debt to Income Ratio")+
+    ggtitle("Ratio of Debt to Income over Years") +
+    theme_minimal()+
+    theme(plot.title = element_text(
+    size = rel(1.5), hjust = 0.5, lineheight = .9,
+    family = "Times", face = "bold.italic", colour = "black"), 
+    legend.position="top",
+    legend.direction = "horizontal",
+    legend.title = element_blank(),
+    legend.justification = 0.9,
+    legend.key.height=unit(1,"line"),
+    legend.key.width=unit(3,"line"))
+ggplotly(p_dti) 
+```
+```{r}
+panel <- . %>%
+  plot_ly(x = ~YEAR, y = ~dti) %>%
+  add_markers() %>%
+  add_lines(mode = "lines") %>%
+  add_annotations(
+    text = ~unique(types_of_debt),
+    x = 0.5,
+    y = 1,
+    yref = "paper",
+    xref = "paper",
+    yanchor = "bottom",
+    showarrow = FALSE,
+    font = list(size = 12)
+  ) %>%
+  layout(
+    showlegend = FALSE,
+    shapes = list(
+      type = "rect",
+      x0 = 0,
+      x1 = 1,
+      xref = "paper",
+      y0 = 0, 
+      y1 = 16,
+      yanchor = 1,
+      yref = "paper",
+      ysizemode = "pixel",
+      fillcolor = toRGB("gray80"),
+      line = list(color = "transparent")
+    )
+  )
+
+dti %>%
+  group_by(types_of_debt) %>%
+  do(p = panel(.)) %>%
+  subplot(nrows = NROW(.), shareX = TRUE) %>%
+  layout(title = list(title="Ratio of Debt to Income over Years"))
+```
+### Data Table of Low Net Worth Group
+#### 6. Data Table
+I chose to display the financial situation, education and gender of low net worth group in 2016. I thought this data table can help to study some important factors resulted in struggling in debt and low net worth.
+```{r}
+low_net_worth <-survey_data %>%
+  na.omit()%>%
+  filter(YEAR == 2016) %>%
+  filter(EDN_INST != 0) %>%
+  filter(NWCAT == 1)%>%
+  select(YEAR, EDN_INST, DEBT, INCOME, ASSET, HHSEX, EDUC)
+low_net_worth$HHSEX <- ifelse(low_net_worth$HHSEX == 1, "Male", "Female")
+low_net_worth$EDUC[low_net_worth$EDUC %in% c(-1:9)] <- "No Degree"
+low_net_worth$EDUC[low_net_worth$EDUC %in% c(10,11)] <- "Assocaite Degree"
+low_net_worth$EDUC[low_net_worth$EDUC == 12] <- "Bachelor's Degree"
+low_net_worth$EDUC[low_net_worth$EDUC == 13] <- "Master's Degree"
+low_net_worth$EDUC[low_net_worth$EDUC == 14] <- "Doctorate Degree"
+low_net_worth$EDUC <- factor(low_net_worth$EDUC, levels= c("No Degree","Assocaite Degree","Bachelor's Degree", "Master's Degree", "Doctorate Degree"))
+headers <- c("Year", "Education Debt", "Debt", "Income", "Asset", "Gender", "Education Level")
+datatable(low_net_worth, 
+          colnames = headers, 
+          rownames = FALSE,
+          filter = list(position = "top"),
+          options = list(language = list(sSearch = "Filter:")))
+```
