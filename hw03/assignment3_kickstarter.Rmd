@@ -1,0 +1,597 @@
+---
+title: "Homework 3 - Text Analysis for Kickstarter"
+author: "Xueying Huang"
+date: '2020-04-15'
+output: 
+  html_document:
+    keep_md: true
+    highlight: textmate
+    theme: spacelab
+    toc: yes
+  pdf_document:
+    toc: yes
+  word_document:
+    toc: yes
+  html_notebook:
+    toc: yes
+always_allow_html: yes
+---
+
+Text Mining Kickstarter Projects
+================================
+
+```{r Setup, include=FALSE, results='hide', warning=FALSE}
+library(knitr)
+opts_chunk$set(fig.path="figures/",
+               cache.path="cache/",
+               cache=FALSE,
+               echo=TRUE,
+               message=FALSE,
+               warning=FALSE)  
+```  
+
+## Overview
+
+Kickstarter is an American public-benefit corporation based in Brooklyn, New York, that maintains a global crowd funding platform focused on creativity.  The company's stated mission is to "help bring creative projects to life". 
+
+Kickstarter has reportedly received almost $5 billion in pledges from 17.6 million backers to fund 180,000 creative projects, such as films, music, stage shows, comics, journalism, video games, technology and food-related projects.
+
+For this assignment, I analyze the descriptions of kickstarter projects to identify commonalities of successful (and unsuccessful projects) using the text mining techniques. 
+
+## Data
+
+The dataset for this assignment is taken from [webroboto.io ‘s repository](https://webrobots.io/kickstarter-datasets/). They developed a scrapper robot that crawls all Kickstarter projects monthly since 2009. We will just take data from the most recent crawl on 2020-02-13.
+
+To simplify your task, I have downloaded the files and partially cleaned the scraped data. In particular, I converted several JSON columns, corrected some obvious data issues, and removed some variables that are not of interest (or missing frequently), and remove some duplicated project entries. I have also  subsetted the data to only contain projects originating in the United States (to have only English language and USD denominated projects).
+
+The data is contained in the file `kickstarter_projects_2020_02.csv` and contains about 127k projects and about 20 variables.
+
+```{r}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+```
+
+```{r}
+kickstarter <- read_csv('data/kickstarter_projects_2020_02.csv')
+head(kickstarter)
+```
+
+## Tasks for the Assignment
+
+### 1. Identifying Successful Projects
+
+#### a) Success by Category
+
+There are several ways to identify success of a project:  
+  - State (`state`): Whether a campaign was successful or not.   
+  - Pledged Amount (`pledged`)   
+  - Achievement Ratio: Create a variable `achievement_ratio` by calculating the percentage of the original monetary `goal` reached by the actual amount `pledged` (that is `pledged`\\`goal` *100).    
+  - Number of backers (`backers_count`)  
+  - How quickly the goal was reached (difference between `launched_at` and `state_changed_at`) for those campaigns that were successful.  
+
+Use one or more of these measures to visually summarize which categories were most successful in attracting funding on kickstarter. Briefly summarize your findings.
+```{r}
+# Add two columns: achievement_ratio and time difference between `launched_at` and `state_changed_at`
+kick <- kickstarter %>%
+  mutate(achievement_ratio = pledged/goal * 100) %>%
+  mutate(diff_days = as.numeric(state_changed_at - launched_at))
+```
+
+```{r}
+freq <- kick %>%
+  group_by(top_category,state) %>%
+  summarise(freq = n()) %>%
+  group_by(top_category) %>%
+  mutate(perc = freq/sum(freq)*100)
+
+freq_suc <- freq %>%
+  filter(state == 'successful') %>%
+  select(-c(state,freq), perc_suc = perc)
+
+freq <- freq %>%
+  left_join(freq_suc, by = 'top_category')
+freq$state <- factor(freq$state, levels = c('failed','canceled','suspended','live','successful'))
+```
+1. First, I used State (`state`) to determine if one project is successful or not. So, I created a stack bar plot and found that dance and comics have high percentage of successful projects.
+```{r}
+library(ggthemes)
+category_state <- ggplot(freq, aes(fill = state, x = reorder(top_category,perc_suc), y = freq)) +
+         geom_bar(position = "fill", stat = "identity", alpha = 0.8) +
+         coord_flip() +
+        scale_x_discrete() + 
+        scale_fill_brewer(palette="BrBG")+
+        labs(x= NULL, y = "Percentage of Different Project State", fill = "State")+
+        theme_clean()
+category_state
+```
+2. Then, I further explore the projects by visualizing their achievement ratio. As we can see, some music projects have rather high achievement ratio. But since the number of these main category projects is too large, the variance is also high.
+We can find there are relatively fewer dance and comics projects, but these projects rarely have a low achievement ratio. I think these projects have a certain professional skills and unique hobbies, which limit the scale of the groups. But people who prefer these activities are more willing to pay for these projects than the mass.
+```{r}
+library(viridis)
+category_achieve_ratio <- ggplot(kick, aes(x = top_category, y = achievement_ratio, fill = top_category)) +
+  geom_jitter(aes(color = top_category),size = 0.2)+
+  scale_color_viridis(discrete=TRUE, option="viridis")+
+  scale_y_continuous(trans = 'log10')+
+  ggtitle("Achievement Ratio of Different Category Projects")+
+  labs(x= "Category", y = "Achievement Ratio") +
+  theme_clean()+ 
+  theme(axis.text.x = element_text(angle = 30, hjust = 1),
+        legend.position = "none",
+        plot.title = element_text(hjust=0.5)
+        )
+
+category_achieve_ratio
+```
+
+#### **BONUS ONLY:** b) Success by Location
+
+Now, use the location information to calculate the total number of successful projects by state (if you are ambitious, normalize by population). Also, identify the Top 50 "innovative" cities in the U.S. (by whatever measure you find plausible). Provide a leaflet map showing the most innovative states and cities in the U.S. on a single map based on these information.
+
+```{r}
+library(openintro)
+library(albersusa)
+library(sp)
+# Calculate the total number of successful projects by state
+state_suc <- kick %>%
+  filter(state == "successful") %>%
+  group_by(location_state) %>%
+  summarise(num = n()) %>%
+  mutate(state_name = abbr2state(location_state)) 
+
+# Use usa_df()
+state_inno <- usa_sf() %>%
+  left_join(state_suc, c("name"="state_name"))
+
+# Normalize by population
+state_inno_pop <- state_inno %>%
+  mutate(inno_pop = num/pop_2014*10000)
+
+most_inno_city <- kick %>%
+  group_by(location_town)%>%
+  summarise(avg_achieve_ratio = round(median(achievement_ratio),2)) %>%
+  arrange(desc(avg_achieve_ratio))%>%
+  head(50)
+most_inno_city[most_inno_city$location_town== "34773",]$location_town <- "Saint Cloud"
+most_inno_city[most_inno_city$location_town== "32821",]$location_town <- "Orlando"
+most_inno_city[most_inno_city$location_town== "19136",]$location_town <- "Philadelphia"
+most_inno_city[most_inno_city$location_town== "13361",]$location_town <- "Jordanville"
+most_inno_city[most_inno_city$location_town== "Wynwood Art District",]$location_town <- "Wynwood"
+# Most innovative 50 cities in the United States
+cities <- most_inno_city$location_town
+```
+
+```{r}
+library(geonames)
+options(geonamesUsername="lilixueying")
+options(geonamesHost="api.geonames.org")
+
+GNsearchUS <- function(x){
+  city_df <- GNsearch(name = x, country = "US")
+  city_coords <- city_df[1, c("lng", "lat")]
+  return(city_coords)
+}
+GNresult<- lapply(cities, GNsearchUS) 
+```
+```{r}
+result <- do.call("rbind", GNresult)
+top_inno_cities <- cbind(most_inno_city, result)
+# Prepare the cities dataset and provide the lon/lat for cities
+top_inno_cities$lng <- as.numeric(top_inno_cities$lng)
+top_inno_cities$lat <- as.numeric(top_inno_cities$lat)
+head(top_inno_cities)
+```
+The color of each state represents the average number of successful projects (Per 10000 Population) in this state. And I calculate the average achievement ratio for each town and subset the top 50 innovative cities to put on the map. Clicking the popup can access more details.
+```{r}
+library(leaflet)
+spdf <- rmapshaper::ms_simplify(state_inno_pop, keep = 0.1)
+pal_response <- colorNumeric("GnBu",domain = 0:7)
+
+epsg2163 <- leafletCRS(
+  crsClass = "L.Proj.CRS",
+  code = "EPSG:2163",
+  proj4def = "+proj=laea +lat_0=45 +lon_0=-100 +x_0=0 +y_0=0 +a=6370997 +b=6370997 +units=m +no_defs",
+  resolutions = 2^(16:7))
+
+inno_icons <- icons(
+  iconUrl = "data/inno_icon.png",
+  iconWidth = 20, iconHeight = 20,
+  iconAnchorX = 7.5, iconAnchorY = 8.5
+  )
+
+spdf %>%
+  leaflet(options = leafletOptions(crs = epsg2163)) %>%
+  addPolygons(weight = 1, opacity = 1, color = "#444444", 
+    fillColor = ~pal_response(inno_pop), fillOpacity = 0.7, smoothFactor = 0.5,
+    label = ~paste(name, ": ",inno_pop, "successful Projects (Per 10k Population)"))%>%
+    addMarkers(data = top_inno_cities, lng = ~lng, lat = ~lat, popup = ~paste("Top 50 Innovative Town: ", location_town, "<br>Average Achievement Ratio: ", avg_achieve_ratio), icon = inno_icons)%>%
+    addLegend(pal = pal_response, values = 0:7, title = NULL,
+            position = "topleft", opacity=0.7)
+```
+
+
+
+### 2. Writing your success story
+
+Each project contains a `blurb` -- a short description of the project. While not the full description of the project, the short headline is arguably important for inducing interest in the project (and ultimately popularity and success). Let's analyze the text.
+
+#### a) Cleaning the Text and Word Cloud
+```{r}
+library(tm)       # Framework for text mining.
+library(quanteda) # Another great text mining package
+library(tidytext) # Text as Tidy Data (good for use with ggplot2)
+library(qdap)
+library(SnowballC)
+```
+
+1) To reduce the time for analysis, select the 1000 most successful projects and a sample of 1000 unsuccessful projects. 
+```{r}
+# Filter those successful projects and pick those with higher achievement ratio
+successful <- kick %>%
+  filter(state == "successful") %>%
+  arrange(desc(achievement_ratio)) %>%
+  head(1000)
+# Filter those failed projects with lower achievement ratio
+fail <- kick %>%
+  filter(state == "failed") %>%
+  arrange(achievement_ratio) %>%
+  head(1000)
+all <- as.data.frame(cbind(successful$blurb,fail$blurb), stringsAsFactors = FALSE)
+colnames(all) <- c("success","fail")
+head(all)
+```
+
+2) Use the cleaning functions to remove unnecessary words (stop words), syntax, punctuation, numbers, white space etc. Note, that many projects use their own unique brand names in upper cases, so try to remove these fully capitalized words as well (since we are aiming to identify common words across descriptions). 
+
+```{r}
+# Dedine a clean_corpus function
+clean_corpus <- function(corpus){
+  corpus <- tm_map(corpus, content_transformer(function(x){
+              processed <- gsub(pattern = '[^a-zA-Z0-9\\s]+', x, replacement = "",
+              ignore.case = TRUE,perl = TRUE)
+              # Remove fully capitalized words. "\b" means word boundary. 
+              processed <- gsub("\\b[A-Z]+\\b","", processed)
+              return(processed)}))
+  # convert upper case to lower case, remove symbols and (..)
+  corpus <- tm_map(corpus, content_transformer(tolower))
+  corpus <- tm_map(corpus, content_transformer(replace_symbol))
+  corpus <- tm_map(corpus, content_transformer(replace_contraction))
+  # remove numbers, puctuations and whitespace
+  corpus <- tm_map(corpus, removeNumbers)
+  corpus <- tm_map(corpus, removePunctuation)
+  corpus <- tm_map(corpus, stripWhitespace)
+  # Remove stopwords
+  corpus <- tm_map(corpus, removeWords,c(stopwords("en"),"kickstarter", "project", "rd", "st", "th","the"))
+  
+  return(corpus)
+}
+```
+
+
+```{r}
+# Convert descriptions of successful projects to corpus
+s_projects <- VectorSource(all$success)
+s_corpus <- VCorpus(s_projects)
+s_clean <- clean_corpus(s_corpus)
+```
+
+```{r}
+# Convert descriptions of failed projects to corpus
+f_projects <- VectorSource(all$fail)
+f_corpus <- VCorpus(f_projects)
+f_clean <- clean_corpus(f_corpus)
+```
+
+3) Stem the words left over and complete the stems. 
+```{r}
+s_stemed <- tm_map(s_clean, stemDocument)
+f_stemed <- tm_map(f_clean, stemDocument)
+```
+
+```{r}
+# Stem completion function
+stemCompletion2 <- function(x, dictionary) {
+   x <- unlist(strsplit(as.character(x), " "))
+   # stemCompletion completes an empty string to a word in dictionary. 
+   # Remove empty string to avoid issue.
+   x <- x[x != ""]
+   x <- stemCompletion(x, dictionary=dictionary)
+   x <- paste(x, sep="", collapse=" ")
+   PlainTextDocument(stripWhitespace(x))
+}
+```
+
+```{r}
+# Stem completion
+s_comp <- lapply(s_stemed, stemCompletion2, 
+                     dictionary=s_clean)
+s_comp_corpus <- as.VCorpus(s_comp)
+f_comp <- lapply(f_stemed, stemCompletion2,
+                 dictionary =f_clean)
+f_comp_corpus <- as.VCorpus(f_comp)
+```
+
+```{r}
+# Compare the result of text stemmed and stem completed
+print(s_comp_corpus[[1]]$content)
+print(s_stemed[[1]]$content)
+print(f_comp_corpus[[15]]$content)
+print(f_stemed[[15]]$content)
+```
+
+4) Create a document-term-matrix.
+```{r}
+s_dtm <- DocumentTermMatrix(s_comp_corpus)
+f_dtm <- DocumentTermMatrix(f_comp_corpus)
+print(s_dtm)
+print(f_dtm)
+```
+
+5) Provide a word cloud of the most frequent or important words among the most successful projects.
+
+I chose TFIDF as the weight measure and found the most frequent words (penalized by frequency in all documents). As we can see in this wordcloud, design, game, enamel, art, album, comic, play are most frequent theme mentioned in successful projects'descriptions. Besides, those projects with creative idea are more likely to be successful. For example, we see some words like new, timest, create, first, edition etc. These words indicate that successful projects convey a kind of new experience to people.
+```{r}
+# I choose TFIDF to weight words
+tfidf_dtm <- DocumentTermMatrix(s_comp_corpus, control = list(weight = weightTfIdf))
+tfidf_dtm_m <- as.matrix(tfidf_dtm)
+tfidf_weight <- colSums(tfidf_dtm_m)
+tfidf_word <- names(tfidf_weight)
+```
+```{r}
+library(wordcloud)
+pal2 <- brewer.pal(8,"Dark2")
+set.seed(1)
+wordcloud(tfidf_word, tfidf_weight, 
+          min.freq=1,
+          max.words=50,
+          colors=c("DarkOrange", "CornflowerBlue", "DarkRed"),
+          rot.per = 0.3,
+          random.order=FALSE,
+          random.color=FALSE)
+```
+
+```{r}
+library(wordcloud2)
+df_tfidf <- as.data.frame(cbind(tfidf_word,tfidf_weight),stringsAsFactors = FALSE, row.names = FALSE, )
+df_tfidf$tfidf_weight <- as.integer(df_tfidf$tfidf_weight)
+wordcloud2(df_tfidf, size=1.6, color='random-dark')
+```
+
+#### b) Success in words
+
+Provide a pyramid plot to show how the words between successful and unsuccessful projects differ in frequency. A selection of 10 - 20 top words is sufficient here. 
+```{r}
+# combine descriptions of successful projects and failed projects
+all_s <- paste(successful$blurb, collapse = "")
+all_f <- paste(fail$blurb, collapse = "")
+all_projects <-c(all_s, all_f)
+all_corpus <- VCorpus(VectorSource(all_projects))
+all_clean <- clean_corpus(all_corpus)
+all_tdm <- TermDocumentMatrix(all_clean)
+```
+
+1) First, I made a polarized wordcloud for successful projects and failed projects. Compared to successful projects, the most common but unique words for failed projects include community, family, local, share, people, which indicates a kind of collectivism and tradition local style. On the other hand, successful projects underscore innovation and individuation.
+```{r}
+# Polarized tag cloud
+colnames(all_tdm) <- c("success","fail")
+all_m <- as.matrix(all_tdm)
+comparison.cloud(all_m, colors = c("cyan4", "darkgoldenrod2"), max.words = 40)
+```
+
+2) Then, I just kept those common words in both successful and failed projects, calculated the difference between the frequency and showed those common words with greatest difference. According to the pyramid plot, we can found successful projects describe more on the projects themselves, like game, comic,edition, cards. However, failed projects try to convey the meaning of the projects, so there are a lot of words like can, help, world, create etc.
+```{r}
+library(plotrix)
+all_m_df <- as.data.frame(all_m)
+all_m_df$terms <- rownames(all_m_df) 
+common_words <- all_m_df %>%
+  filter(success!=0, fail!=0) %>%
+  mutate(diff = abs(success - fail))
+top_df <- top_n(common_words, 20, diff)
+pyramid.plot(top_df$success, top_df$fail, labels = top_df$terms, gap = 10,
+             top.labels = c("Success Projects", "Words", "Fail Projects"),
+             main = "Words in Common", unit = NULL, labelcex=0.7)
+```
+
+#### c) Simplicity as a virtue
+
+These blurbs are short in length (max. 150 characters) but let's see whether brevity and simplicity still matters. Calculate a readability measure (Flesh Reading Ease, Flesh Kincaid or any other comparable measure) for the texts. Visualize the relationship between the readability measure and one of the measures of success. Briefly comment on your finding.
+
+1) I calculate Flesh, Flesh Kincaid measures. Compare the effects they showed in visualization, I eventually chose to use Flesh Kincaid as the index of readability. The lower the Flesch-Kincaid Grade Level, the easier a piece of text is to read.
+```{r}
+library(quanteda)
+read_s <- successful%>%
+  select(id, blurb, state, top_category, achievement_ratio, diff_days, backers_count)
+read_f <- fail%>%
+   select(id, blurb, state, top_category, achievement_ratio, diff_days, backers_count)
+read_all <- rbind(read_s,read_f)
+df_read <- data.frame(doc_id = read_all$id, text = read_all$blurb, read_all[,3:7], stringsAsFactors = FALSE)
+df_source <- DataframeSource(df_read)
+df_corpus <- VCorpus(df_source)
+read_corpus <- corpus(df_corpus)
+FRE_read <- textstat_readability(read_corpus,
+              measure=c('Flesch', 'Flesch.Kincaid'))
+read_score <- data.frame(cbind(read_all,FRE_read))
+read_score <-rename(read_score, c("FK" = "Flesch.Kincaid"))
+head(read_score)
+```
+2) In this plot, I try to find the relationships between the readability measure and successful projects. From this plot, we can not include that readability has direct relations with successful or failed state. However, we can still get some useful information from the plot. There are two key time, about 30 days and 60 days. This means the time for projects to collect crowd funding is about one month and two months. And we can find successful projects have more backers than that of failed.
+```{r}
+read_score %>%
+  filter(diff_days != 0) %>%
+  ggplot(aes(x = diff_days, y = FK, size = backers_count))+
+  geom_point(alpha = 0.5, aes(col = as.factor(state)))+
+  scale_size_continuous(range = c(1, 10))+
+  labs(x = "Days Between State Change", y = "Flesch-Kincaid Grade Level", size = "Backers Count", col ="State")+
+  theme_bw()
+```
+
+3) I continue to explore the relationships between readability measure and successful projects. As the fitted line shows, when the descriptions become harder to read, the backer counts increased a little bit. But actually, the effect is too tiny to observe directly. Besides, the size of circles represents the achievement ratio of projects. We can find that descriptions of some projects with very high achievement ratio have a low Flesch-Kincaid Grade Level, which means easier to read.
+```{r}
+library(ggthemes)
+read_score %>%
+  filter(backers_count !=0) %>%
+  ggplot(aes(x= backers_count, y = FK, size = achievement_ratio))+
+  scale_x_continuous(trans = "log10")+
+  geom_point(alpha = 0.7, aes(col = top_category))+
+  scale_size_continuous(range = c(1, 10))+
+  geom_smooth(method = 'gam', col = "black", size = 0.8) +
+  guides(size = FALSE) +
+  theme_tufte() +
+  xlab("Log Backers Count") + ylab("Flesch-Kincaid Grade Level")
+```
+
+
+### 3. Sentiment
+
+Now, let's check whether the use of positive / negative words or specific emotions helps a project to be successful. 
+
+#### a) Stay positive
+
+Calculate the tone of each text based on the positive and negative words that are being used.I use the Bing dictionary contained in the tidytext package (`tidytext::sentiments`). Visualize the relationship between tone of the document and success.
+
+```{r}
+library(tidytext)
+library(broom)
+bing <- get_sentiments("bing")
+s_sent <- tidy(DocumentTermMatrix(s_clean))
+f_sent <- tidy(DocumentTermMatrix(f_clean))
+```
+
+1) I inner join the bing lexicon to determine if the words in the descritions are positive and negative. After summarizing the total number of possitive words and negative words, I calculated the polarity, which is the difference between number of positive words and negative words for each description.
+```{r}
+s_polarity <- s_sent %>%
+  inner_join(bing, by = c("term"="word")) %>%
+  mutate(index = as.numeric(document)) %>%
+  count(sentiment, index) %>%
+  spread(sentiment,n,fill = 0) %>%
+  mutate(polarity = positive - negative)
+f_polarity <- f_sent %>%
+  inner_join(bing, by = c("term"="word")) %>%
+  mutate(index = as.numeric(document)) %>%
+  count(sentiment, index) %>%
+  spread(sentiment,n,fill = 0) %>%
+  mutate(polarity = positive - negative)
+s_polarity$state <- "successful"
+f_polarity$state <- "failed"
+```
+
+```{r}
+all_polarity <- rbind(s_polarity,f_polarity)
+all_polarity$state <- as.factor(all_polarity$state)
+head(all_polarity)
+```
+
+2) All descriptions, whether successful or failed, show a kind of positive tone since their polarity score are all positive numbers. In average, we can say failed projects have a higher positive tone in descriptions than that of successful projects. This might be a reason for failure, which means the descriptions are too ideal and do not take a lot of real and plausible analysis into account. People are less likely to support a porject with a high goal but lack of specifc plan.
+```{r}
+ggplot(all_polarity, aes(index,polarity))+
+  geom_smooth(aes(color = state, fill = state), method = "loess") + 
+  scale_color_viridis(discrete = TRUE, option = "D")+
+  scale_fill_viridis(discrete = TRUE)+
+  geom_hline(yintercept = 0, color = "red") +
+  ggtitle("Project Description Polarity")+
+  labs(x = "Project No.", y="Positive Polarity")+
+  theme_economist()+
+  theme(plot.title = element_text(hjust=0.5))
+```
+
+#### b) Positive vs negative
+
+Segregate all 2,000 blurbs into positive and negative texts based on their polarity score calculated in step (a). Now, collapse the positive and negative texts into two larger documents. Create a document-term-matrix based on this collapsed set of two documents. Generate a comparison cloud showing the most-frequent positive and negative words.  
+```{r}
+# Combine all descriptions of successful projects and failed ones. 
+# Create a dataset which just have two columns, one is text, another is polarity
+s <- successful %>%
+  mutate(index = row_number())%>%
+  select(blurb, index)
+ss <- s_polarity %>%
+  left_join(s,by="index")%>%
+  select(blurb,polarity)
+f <- fail %>%
+  mutate(index = row_number())%>%
+  select(blurb, index)
+ff <- f_polarity %>%
+  left_join(f,by="index")%>%
+  select(blurb,polarity)
+total <- rbind(ss,ff)
+total_df <- total %>%
+  select(text = blurb, polarity = polarity)
+head(total_df)
+```
+
+```{r}
+# Create a function that can split the positive polarity and negative polarity text
+# Paste all positive texts as one long string, paste all negative texts as another long string
+subsection <- function(df){
+  x.pos <- subset(df$text, df$polarity > 0)
+  x.neg <- subset(df$text, df$polarity < 0)
+  x.pos <- paste(x.pos, collapse = " ")
+  x.neg <- paste(x.neg, collapse = " ")
+  all.terms <- c(x.pos, x.neg)
+  return(all.terms)
+}
+all_terms <- subsection(total_df)
+```
+
+```{r}
+# Create a polarity wordcloud
+polarity_corpus <- all_terms %>%
+  VectorSource() %>%
+  VCorpus()
+
+all_tdm <-TermDocumentMatrix(polarity_corpus, 
+          control = list(removePunctuation = TRUE, stopwords = stopwords("en"))) %>%
+            as.matrix()
+colnames(all_tdm) <- c("positive", "negative")
+polarity_cloud <- comparison.cloud(all_tdm, max.words = 80, colors = c("goldenrod1","darkolivegreen4"))
+```
+
+#### c) Get in their mind
+
+Now, use the NRC Word-Emotion Association Lexicon in the tidytext package to identify a larger set of emotions (anger, anticipation, disgust, fear, joy, sadness, surprise, trust). Again, visualize the relationship between the use of words from these categories and success. What is your finding?
+
+1) Get the nrc lexicon
+```{r}
+library(textdata)
+library(tidytext)
+
+nrc <- get_sentiments("nrc")
+head(nrc)
+```
+
+2) Show all tokens with the state of the project they come from.
+```{r}
+s_sent$state <-"successful"
+f_sent$state <-"failed"
+all_emotion <- rbind(s_sent, f_sent)
+head(all_emotion)
+```
+
+3) Inner join the tokens dataset with nrc lexicon. I dropped those tokens with positive/negative sentiment and just kept those tokens with specific emotions. Then, I calculate the total number of tokens for all emotions in two kinds of state, individually.
+```{r}
+scores <- all_emotion %>%
+  inner_join(nrc, by = c("term"="word")) %>%
+  filter(!grepl("positive|negative",sentiment)) %>%
+  count(state, sentiment) %>%
+  spread(state,n)
+scores
+```
+
+4) I create a Radar plot that shows 8 emotions. The finding is interesting that the descriptions of failed projects and successful projects share similar shape sentiment radar. They both emphasize more on some emotions like joy, trust and anticipation. But the problem of failed projects is that they amplify the differences between main emotions and other complicated emotions, so they can convey people just a joyful and peaceful feel. On the other hand, successful balance all emotions better. The descriptions show more various and multidimensional emotions, which make the projects seem to more realistic and reliable. 
+```{r}
+library(radarchart)
+library(webshot)
+library(htmlwidgets)
+library(png)
+radarPlot <- chartJSRadar(scores, showToolTipLabel=TRUE, main = "Sentiment Radar")
+saveWidget(radarPlot, "radarplt.html")
+webshot("radarplt.html")
+img <- magick::image_read("webshot.png")
+plot(img)
+```
+## Submission
+
+Please follow the [instructions](/Exercises/homework_submission_instructions.md) to submit your homework. The homework is due on Thursday, April 16.
+
+## Please stay honest!
+
+If you do come across something online that provides part of the analysis / code etc., please no wholesale copying of other ideas. We are trying to evaluate your abilities to visualized data not the ability to do internet searches. Also, this is an individually assigned exercise -- please keep your solution to yourself. 
